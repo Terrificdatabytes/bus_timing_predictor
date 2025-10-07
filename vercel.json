@@ -1,9 +1,15 @@
 {
-  "version": 2,
   "builds": [
     {
       "src": "bus_predictor/app.py",
-      "use": "@vercel/python"
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "250mb",
+        "includeFiles": [
+          "bus_predictor/templates/**",
+          "requirements.txt"
+        ]
+      }
     }
   ],
   "routes": [
