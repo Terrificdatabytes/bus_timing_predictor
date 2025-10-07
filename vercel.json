@@ -1,14 +1,15 @@
+{
+  "version": 2,
+  "builds": [
     {
-      "builds": [
-        {
-          "src": "bus_predictor/app.py", 
-          "use": "@vercel/python"
-        }
-      ],
-      "routes": [
-        {
-          "src": "/(.*)",
-          "dest": "bus_predictor/app.py"
-        }
-      ]
+      "src": "bus_predictor/app.py",
+      "use": "@vercel/python"
     }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "bus_predictor/app.py"
+    }
+  ]
+}
