@@ -1,12 +1,10 @@
+# app.py - Flask Backend
 from flask import Flask, render_template, request, jsonify, send_file
 import pandas as pd
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 
-# --- VERCEL SIZE FIX: Import and patch scikit-learn for smaller deployment size ---
-# This requires 'scikit-learn-intelex' instead of 'scikit-learn' in requirements.txt
+# --- VERCEL SIZE FIX: Optimized Scikit-Learn ---
+# Requires 'scikit-learn-intelex' in requirements.txt
 from sklearnex import patch_sklearn
 patch_sklearn()
 # Standard scikit-learn imports now use the optimized, smaller binaries
@@ -14,9 +12,10 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+# Matplotlib and plotting functions REMOVED to maintain < 250MB size limit.
+# Visualization will be handled by the client (index.html).
+
 import io
-import base64
-from datetime import datetime
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import PolynomialFeatures
 import os
@@ -31,15 +30,18 @@ model_data = {
     'predictions': None,
     'actual': None,
     'metrics': None,
-    'feature_names': ['hour', 'weekday', 'scheduled_arrival']
+    # FIXED: Now includes the required fourth feature
+    'feature_names': ['hour', 'weekday', 'scheduled_arrival', 'passenger_count'] 
 }
 
 @app.route('/')
 def index():
+    """Renders the main HTML page."""
     return render_template('index.html')
 
 @app.route('/upload', methods=['POST'])
 def upload_csv():
+    """Handles CSV file upload and stores it for training."""
     try:
         if 'file' not in request.files:
             return jsonify({'error': 'No file uploaded'}), 400
@@ -54,7 +56,8 @@ def upload_csv():
         # Validate columns
         required_cols = ['timestamp', 'actual_arrival', 'scheduled_arrival', 'passenger_count']
         if not all(col in df.columns for col in required_cols):
-            return jsonify({'error': f'CSV must contain: {", ".join(required_cols)}'}), 400
+            missing_cols = [col for col in required_cols if col not in df.columns]
+            return jsonify({'error': f"CSV must contain: {', '.join(missing_cols)}"}), 400
         
         # Store in session (for simplicity, using global variable)
         app.config['DATA'] = df
@@ -66,10 +69,11 @@ def upload_csv():
         })
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Upload Error: {str(e)}'}), 500
 
 @app.route('/train', methods=['POST'])
 def train_model():
+    """Handles model training based on user configuration."""
     try:
         config = request.json
         model_type = config.get('model_type', 'linear')
@@ -77,17 +81,19 @@ def train_model():
         
         df = app.config.get('DATA')
         if df is None:
-            return jsonify({'error': 'No data uploaded'}), 400
+            return jsonify({'error': 'No data uploaded. Please upload a CSV first.'}), 400
         
         # Prepare features
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['hour'] = df['timestamp'].dt.hour
         df['weekday'] = df['timestamp'].dt.dayofweek
         
-        # Remove NaN values
-        df_clean = df[['hour', 'weekday', 'scheduled_arrival', 'actual_arrival']].dropna()
+        # Select features and remove NaN values
+        cols_to_use = model_data['feature_names'] + ['actual_arrival']
+        df_clean = df[cols_to_use].dropna()
         
-        X = df_clean[['hour', 'weekday', 'scheduled_arrival']].values
+        # FIXED: X now contains all four features
+        X = df_clean[model_data['feature_names']].values
         y = df_clean['actual_arrival'].values
         
         # Split data
@@ -104,9 +110,7 @@ def train_model():
         if model_type == 'linear':
             model = LinearRegression()
         else:
-            # Polynomial features for "dense" equivalent
-            from sklearn.preprocessing import PolynomialFeatures
-            from sklearn.pipeline import Pipeline
+            # Polynomial features (for "dense" equivalent)
             model = Pipeline([
                 ('poly', PolynomialFeatures(degree=2)),
                 ('linear', LinearRegression())
@@ -125,14 +129,11 @@ def train_model():
         # Store model and results
         model_data['model'] = model
         model_data['scaler'] = scaler
-        model_data['predictions'] = y_pred
-        model_data['actual'] = y_test
+        model_data['predictions'] = y_pred.tolist()
+        model_data['actual'] = y_test.tolist()
         model_data['metrics'] = {'mae': mae, 'rmse': rmse, 'r2': r2}
         
-        # Generate plots
-        plot1 = generate_pred_vs_actual_plot(y_test, y_pred)
-        plot2 = generate_residuals_plot(y_test, y_pred)
-        
+        # Return metrics and raw data for client-side plotting
         return jsonify({
             'success': True,
             'metrics': {
@@ -140,73 +141,31 @@ def train_model():
                 'rmse': round(rmse, 2),
                 'r2': round(r2, 3)
             },
-            'plot_pred_vs_actual': plot1,
-            'plot_residuals': plot2
+            'actual': model_data['actual'],
+            'predictions': model_data['predictions']
         })
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-def generate_pred_vs_actual_plot(y_test, y_pred):
-    plt.figure(figsize=(8, 6))
-    plt.scatter(y_test, y_pred, alpha=0.6, color='#667eea', s=50)
-    
-    # Ideal line
-    min_val = min(y_test.min(), y_pred.min())
-    max_val = max(y_test.max(), y_pred.max())
-    plt.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='Ideal')
-    
-    plt.xlabel('Actual Arrival (min)', fontsize=12)
-    plt.ylabel('Predicted Arrival (min)', fontsize=12)
-    plt.title('Predicted vs Actual Arrival Time', fontsize=14, fontweight='bold')
-    plt.legend()
-    plt.grid(alpha=0.3)
-    plt.tight_layout()
-    
-    # Convert to base64
-    buffer = io.BytesIO()
-    plt.savefig(buffer, format='png', dpi=100)
-    buffer.seek(0)
-    plot_data = base64.b64encode(buffer.read()).decode()
-    plt.close()
-    
-    return plot_data
-
-def generate_residuals_plot(y_test, y_pred):
-    residuals = y_pred - y_test
-    
-    plt.figure(figsize=(8, 6))
-    plt.scatter(y_pred, residuals, alpha=0.6, color='#764ba2', s=50)
-    plt.axhline(y=0, color='r', linestyle='--', linewidth=2)
-    
-    plt.xlabel('Predicted Arrival (min)', fontsize=12)
-    plt.ylabel('Residuals (min)', fontsize=12)
-    plt.title('Residuals vs Predicted', fontsize=14, fontweight='bold')
-    plt.grid(alpha=0.3)
-    plt.tight_layout()
-    
-    # Convert to base64
-    buffer = io.BytesIO()
-    plt.savefig(buffer, format='png', dpi=100)
-    buffer.seek(0)
-    plot_data = base64.b64encode(buffer.read()).decode()
-    plt.close()
-    
-    return plot_data
+        # Log the full error to the console for debugging
+        print(f"Error during training: {e}")
+        return jsonify({'error': f'Training Error: {str(e)}'}), 500
 
 @app.route('/predict', methods=['POST'])
 def predict():
+    """Handles real-time prediction based on user input features."""
     try:
         if model_data['model'] is None:
             return jsonify({'error': 'Model not trained yet'}), 400
         
         data = request.json
-        hour = float(data['hour'])
-        weekday = float(data['weekday'])
-        scheduled = float(data['scheduled'])
+        hour = float(data.get('hour'))
+        weekday = float(data.get('weekday'))
+        scheduled = float(data.get('scheduled'))
+        # FIXED: Retrieve the fourth feature
+        passenger_count = float(data.get('passenger_count')) 
         
-        # Prepare input
-        X_input = np.array([[hour, weekday, scheduled]])
+        # Prepare input: MUST match the feature order: [hour, weekday, scheduled_arrival, passenger_count]
+        X_input = np.array([[hour, weekday, scheduled, passenger_count]])
         X_input_scaled = model_data['scaler'].transform(X_input)
         
         # Predict
@@ -218,19 +177,21 @@ def predict():
         })
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"Error during prediction: {e}")
+        return jsonify({'error': f'Prediction Error: {str(e)}'}), 500
 
 @app.route('/download_csv')
 def download_csv():
+    """Allows users to download a CSV file of the test data results."""
     try:
-        if model_data['predictions'] is None:
+        if model_data['predictions'] is None or model_data['actual'] is None:
             return jsonify({'error': 'No predictions available'}), 400
         
         # Create DataFrame
         df = pd.DataFrame({
             'Actual': model_data['actual'],
             'Predicted': model_data['predictions'],
-            'Residual': model_data['predictions'] - model_data['actual']
+            'Residual': np.array(model_data['predictions']) - np.array(model_data['actual'])
         })
         
         # Convert to CSV
@@ -242,19 +203,12 @@ def download_csv():
             io.BytesIO(output.getvalue().encode()),
             mimetype='text/csv',
             as_attachment=True,
-            download_name='bus_predictions.csv'
+            download_name='bus_predictions_test_results.csv'
         )
     
     except Exception as e:
+        print(f"Error during CSV download: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
-
-
-# ==================================================
-# templates/index.html - Frontend Template
-# ==================================================
-"""
-
-"""
