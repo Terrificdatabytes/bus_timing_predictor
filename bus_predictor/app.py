@@ -1,16 +1,24 @@
-# app.py - Flask Backend
 from flask import Flask, render_template, request, jsonify, send_file
 import pandas as pd
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+
+# --- VERCEL SIZE FIX: Import and patch scikit-learn for smaller deployment size ---
+# This requires 'scikit-learn-intelex' instead of 'scikit-learn' in requirements.txt
+from sklearnex import patch_sklearn
+patch_sklearn()
+# Standard scikit-learn imports now use the optimized, smaller binaries
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
 import io
 import base64
 from datetime import datetime
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import PolynomialFeatures
 import os
 
 app = Flask(__name__)
