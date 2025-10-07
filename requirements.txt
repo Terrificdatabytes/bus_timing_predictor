@@ -2,5 +2,6 @@ flask
 pandas
 numpy
 matplotlib
-scikit-learn
+scikit-learn-intelex
+
 
